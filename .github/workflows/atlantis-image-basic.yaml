@@ -1,0 +1,83 @@
+name: atlantis-image-basic
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*.*.*"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: Build & Push
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        image_type: [alpine, debian]
+    env:
+      PUSH: ${{ github.event_name != 'pull_request' }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        env:
+          SUFFIX: ${{ format('-{0}', matrix.image_type) }}
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern=v{{version}},suffix=${{ env.SUFFIX }}
+            type=semver,pattern=v{{version}},enable=${{ matrix.image_type == 'alpine' }}
+            type=raw,event=push,value=dev,enable={{is_default_branch}},suffix=${{ env.SUFFIX }}
+            type=raw,event=push,value=dev,enable=${{ github.ref == format('refs/heads/{0}', 'main') && matrix.image_type == 'alpine' }}
+            type=raw,event=tag,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }},suffix=${{ env.SUFFIX }}
+            type=raw,event=tag,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') && matrix.image_type == 'alpine' }}
+            type=ref,event=pr,suffix=${{ env.SUFFIX }}
+          flavor: latest=false
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Populate release version
+        run: echo "RELEASE_VERSION=${{ startsWith(github.ref, 'refs/tags/') && '${GITHUB_REF#refs/*/}' || 'dev' }}" >> $GITHUB_ENV
+
+      - name: Build and push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ env.PUSH }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          target: ${{ matrix.image_type }}
+          build-args: |
+            ATLANTIS_VERSION=${{ env.RELEASE_VERSION }}
+            ATLANTIS_COMMIT=${{ github.sha }}
+            ATLANTIS_DATE=${{ github.event.repository.updated_at }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
