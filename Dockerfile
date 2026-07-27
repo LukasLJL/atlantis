@@ -41,9 +41,13 @@ WORKDIR /app
 ENV BUILDER_BASH_VERSION="5.3.9-r1"
 
 RUN apk add --no-cache \
-    bash=${BUILDER_BASH_VERSION}
+    bash=${BUILDER_BASH_VERSION} \
+    git
+
+RUN go install go.opentelemetry.io/otelc/tool/cmd/otelc@main
 
 COPY go.mod go.sum ./
+
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN --mount=type=cache,target=/go/pkg/mod \
     go mod graph | awk '{if ($1 !~ "@") print $2}' | xargs go get
@@ -55,7 +59,7 @@ COPY . /app
 # to resolve struct field offsets at runtime.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags "-X 'main.version=${ATLANTIS_VERSION}' -X 'main.commit=${ATLANTIS_COMMIT}' -X 'main.date=${ATLANTIS_DATE}'" -v -o atlantis .
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} otelc go build -ldflags "-X 'main.version=${ATLANTIS_VERSION}' -X 'main.commit=${ATLANTIS_COMMIT}' -X 'main.date=${ATLANTIS_DATE}'" -v -o atlantis .
 
 FROM debian:${DEBIAN_TAG} AS debian-base
 

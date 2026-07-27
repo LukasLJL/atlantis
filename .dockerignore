@@ -2,6 +2,7 @@
 !cmd/
 !scripts/download-release.sh
 !server/
+!testing/
 !testdrive/
 !main.go
 !go.mod
