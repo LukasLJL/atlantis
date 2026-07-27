@@ -44,22 +44,19 @@ RUN apk add --no-cache \
     bash=${BUILDER_BASH_VERSION} \
     git
 
-RUN go install go.opentelemetry.io/otelc/tool/cmd/otelc@main
+# Install OpenTelemetry Collector (otelc) for building the atlantis binary with OpenTelemetry auto-instrumentation.
+RUN go install go.opentelemetry.io/otelc/tool/cmd/otelc@v1.0.1
 
 COPY go.mod go.sum ./
-
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN --mount=type=cache,target=/go/pkg/mod \
     go mod graph | awk '{if ($1 !~ "@") print $2}' | xargs go get
 
 COPY . /app
 
-# NOTE: -s -w are intentionally omitted from ldflags to preserve DWARF debug info.
-# This is required for OpenTelemetry eBPF auto-instrumentation (go.opentelemetry.io/auto)
-# to resolve struct field offsets at runtime.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} otelc go build -ldflags "-X 'main.version=${ATLANTIS_VERSION}' -X 'main.commit=${ATLANTIS_COMMIT}' -X 'main.date=${ATLANTIS_DATE}'" -v -o atlantis .
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} otelc go build -ldflags "-s -w -X 'main.version=${ATLANTIS_VERSION}' -X 'main.commit=${ATLANTIS_COMMIT}' -X 'main.date=${ATLANTIS_DATE}'" -v -o atlantis .
 
 FROM debian:${DEBIAN_TAG} AS debian-base
 
